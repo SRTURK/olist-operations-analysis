@@ -1,0 +1,17 @@
+{
+  "orders_raw": 99441,
+  "analysis_orders": 96203,
+  "late_rate": 0.06788769580990198,
+  "join_inflation": 0.04544062195517151,
+  "bad_rate_on_time": 0.0924738175865085,
+  "bad_rate_late": 0.6241768579492004,
+  "bad_review_gap": 0.5317030403626919,
+  "anomaly_month": "2018-02",
+  "previous_month": "2018-01",
+  "late_rate_change": 0.08425673099821646,
+  "within_effect": 0.08147280878328536,
+  "mix_effect": 0.00278392221493109,
+  "validation_checks": 20,
+  "review_extra_rows": 551,
+  "top10_seller_late_share": 0.15602511100903385
+}

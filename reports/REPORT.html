@@ -1,0 +1,367 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>电商履约与客户体验诊断</title><style>body{font:16px/1.8 "Microsoft YaHei",system-ui,sans-serif;color:#213547;background:#f5f7fa;margin:0}main{max-width:1080px;margin:36px auto;padding:48px;background:white;border-top:7px solid #176b87}h1{font-size:32px;line-height:1.4}h2{margin-top:40px;color:#176b87}table{display:block;overflow:auto;border-collapse:collapse;font-size:13px;width:100%}th,td{padding:9px 12px;border-bottom:1px solid #dce4ea;text-align:left;white-space:nowrap}th{background:#edf5f8}img{max-width:100%;height:auto}a{color:#176b87}blockquote{margin:18px 0;padding:8px 22px;background:#edf5f8;border-left:4px solid #176b87}code{background:#eef2f5;padding:2px 5px}pre{overflow:auto;padding:16px;background:#eef2f5}@media print{main{margin:0;padding:10px}body{background:white}h2{break-after:avoid}img,table{break-inside:avoid}}</style><main><h1>电商履约与客户体验诊断</h1>
+<p>完成日期：2026-10-23 · SQL + Python · 公开历史数据的回顾性诊断</p>
+<h2>业务结论</h2>
+<ol>
+<li>原始订单 <strong>99,441</strong> 笔，主分析纳入 <strong>96,203</strong> 笔 2017-01 至 2018-08 的有效已送达订单，延迟率 <strong>6.79%</strong>。</li>
+<li>未聚合就连接商品明细与支付明细，会使匹配订单的商品金额高估 <strong>4.54%</strong>。已通过先聚合再关联修复，并与源表金额对账。</li>
+<li>延迟订单差评率 <strong>62.42%</strong>，按期订单 <strong>9.25%</strong>，相差 <strong>53.17 个百分点</strong>。限制到送达当日或之后创建的评价，二者变为 <strong>25.11%</strong> 与 <strong>9.23%</strong>，说明评价时点影响很大。这些都是关联，不能推断改善配送一定带来同等幅度的评分提升。</li>
+<li>最大月度恶化出现在 <strong>2018-01 → 2018-02</strong>：全样本延迟率上升 <strong>8.43 个百分点</strong>。共同地区样本分解中，地区内部变化贡献 <strong>8.15 个百分点</strong>，地区订单结构贡献 <strong>0.28 个百分点</strong>。</li>
+</ol>
+<h2>数据口径与质量</h2>
+<p>来源：<a href="https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce">Olist 发布页</a>。原始 CSV、下载来源和 SHA256 见根目录 data_manifest.json；没有生成模拟业务数据。数据为 2016–2018 年历史数据，结论不代表当前 Olist 经营状况。</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">total_orders</th>
+<th style="text-align: right;">delivered_status</th>
+<th style="text-align: right;">eligible_all_dates</th>
+<th style="text-align: right;">invalid_delivered</th>
+<th style="text-align: right;">no_review</th>
+<th style="text-align: right;">no_items</th>
+<th style="text-align: right;">no_payment</th>
+<th style="text-align: right;">amount_mismatch</th>
+<th style="text-align: right;">multi_seller_orders</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">99441</td>
+<td style="text-align: right;">96478</td>
+<td style="text-align: right;">96470</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">775</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">260</td>
+<td style="text-align: right;">1278</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>数据库加载订单、商品明细、支付、评价、客户、商品、商家、品类翻译 8 张表；地理坐标文件保留但未用于分析。</li>
+<li>日期按原数据的无时区本地时间解析。延迟定义为实际送达<strong>日历日期</strong>晚于预计送达日，避免把当天午夜之后的送达都算延迟。</li>
+<li>差评定义为 1–2 星；无评价不计为好评。一个订单只保留最后答复的评价（ROW_NUMBER），共折叠 551 条额外评价记录。时间并列按 review_id、源文件行号确定性排序。</li>
+<li>商品金额不含运费；支付金额含运费且可能存在业务差异。误差大于 0.05 巴西雷亚尔的订单单独输出，未强行覆盖。两类金额与各自源表分别对账。</li>
+<li>商家排查只使用单商家订单，至少 100 单；混合品类订单按商品金额最大的品类归类，仅供订单诊断。</li>
+<li>全部 <strong>20 项断言通过</strong>；详细数值见 validation_checks.csv。金额例外见 payment_reconciliation_exceptions.csv。</li>
+</ul>
+<p>原始订单状态：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">order_status</th>
+<th style="text-align: right;">orders</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">delivered</td>
+<td style="text-align: right;">96478</td>
+</tr>
+<tr>
+<td style="text-align: left;">shipped</td>
+<td style="text-align: right;">1107</td>
+</tr>
+<tr>
+<td style="text-align: left;">canceled</td>
+<td style="text-align: right;">625</td>
+</tr>
+<tr>
+<td style="text-align: left;">unavailable</td>
+<td style="text-align: right;">609</td>
+</tr>
+<tr>
+<td style="text-align: left;">invoiced</td>
+<td style="text-align: right;">314</td>
+</tr>
+<tr>
+<td style="text-align: left;">processing</td>
+<td style="text-align: right;">301</td>
+</tr>
+<tr>
+<td style="text-align: left;">created</td>
+<td style="text-align: right;">5</td>
+</tr>
+<tr>
+<td style="text-align: left;">approved</td>
+<td style="text-align: right;">2</td>
+</tr>
+</tbody>
+</table>
+<p>主分析仅包含已送达订单，存在完成订单选择；取消/未送达订单不应据此视为正常履约。2018-09 后记录稀疏，排除整段尾部；月末订单仍可能受提取时点与送达状态筛选影响。缺少可信的数据快照日，不能宣称彻底消除了右删失。</p>
+<h2>指标异动：从总量到地区</h2>
+<p><img alt="月度趋势" src="monthly_late_rate.png" /></p>
+<p>选择规则在代码中固定为“相邻两月均不少于 1,000 单的最大延迟率正向变化”，属于探索性定位，未把筛选后的峰值当作独立显著性检验。</p>
+<p>对共同覆盖的 27 个地区使用对称分解：地区内贡献 = 平均订单权重 × 延迟率变化；结构贡献 = 平均延迟率 × 权重变化。共同地区覆盖前月 100.00%、当月 100.00%。两项之和等于共同地区总变化（已断言核验）。</p>
+<p><img alt="地区贡献" src="state_decomposition.png" /></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">state</th>
+<th style="text-align: right;">n0</th>
+<th style="text-align: right;">n1</th>
+<th style="text-align: right;">r0</th>
+<th style="text-align: right;">r1</th>
+<th style="text-align: right;">within_effect</th>
+<th style="text-align: right;">mix_effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">RJ</td>
+<td style="text-align: right;">850</td>
+<td style="text-align: right;">879</td>
+<td style="text-align: right;">0.1306</td>
+<td style="text-align: right;">0.3402</td>
+<td style="text-align: right;">0.0267</td>
+<td style="text-align: right;">0.0033</td>
+</tr>
+<tr>
+<td style="text-align: left;">SP</td>
+<td style="text-align: right;">2975</td>
+<td style="text-align: right;">2632</td>
+<td style="text-align: right;">0.0343</td>
+<td style="text-align: right;">0.0733</td>
+<td style="text-align: right;">0.0161</td>
+<td style="text-align: right;">-0.0010</td>
+</tr>
+<tr>
+<td style="text-align: left;">MG</td>
+<td style="text-align: right;">846</td>
+<td style="text-align: right;">790</td>
+<td style="text-align: right;">0.0307</td>
+<td style="text-align: right;">0.0835</td>
+<td style="text-align: right;">0.0063</td>
+<td style="text-align: right;">0.0000</td>
+</tr>
+<tr>
+<td style="text-align: left;">SC</td>
+<td style="text-align: right;">311</td>
+<td style="text-align: right;">254</td>
+<td style="text-align: right;">0.0997</td>
+<td style="text-align: right;">0.2402</td>
+<td style="text-align: right;">0.0058</td>
+<td style="text-align: right;">-0.0009</td>
+</tr>
+<tr>
+<td style="text-align: left;">BA</td>
+<td style="text-align: right;">228</td>
+<td style="text-align: right;">208</td>
+<td style="text-align: right;">0.0658</td>
+<td style="text-align: right;">0.1923</td>
+<td style="text-align: right;">0.0040</td>
+<td style="text-align: right;">-0.0001</td>
+</tr>
+<tr>
+<td style="text-align: left;">CE</td>
+<td style="text-align: right;">77</td>
+<td style="text-align: right;">84</td>
+<td style="text-align: right;">0.1169</td>
+<td style="text-align: right;">0.3929</td>
+<td style="text-align: right;">0.0033</td>
+<td style="text-align: right;">0.0005</td>
+</tr>
+<tr>
+<td style="text-align: left;">PR</td>
+<td style="text-align: right;">371</td>
+<td style="text-align: right;">335</td>
+<td style="text-align: right;">0.0162</td>
+<td style="text-align: right;">0.0896</td>
+<td style="text-align: right;">0.0038</td>
+<td style="text-align: right;">-0.0001</td>
+</tr>
+<tr>
+<td style="text-align: left;">RS</td>
+<td style="text-align: right;">367</td>
+<td style="text-align: right;">363</td>
+<td style="text-align: right;">0.0817</td>
+<td style="text-align: right;">0.1322</td>
+<td style="text-align: right;">0.0027</td>
+<td style="text-align: right;">0.0004</td>
+</tr>
+</tbody>
+</table>
+<p>表中率和贡献均为小数比例；乘以 100 得到百分比或百分点。这是算术分解，不能解释为物流供应商、天气或罢工等原因；数据没有这些外部变量。</p>
+<h2>延迟与客户体验</h2>
+<p><img alt="延迟与评价" src="delay_reviews.png" /></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">delay_bucket</th>
+<th style="text-align: right;">orders</th>
+<th style="text-align: right;">reviewed</th>
+<th style="text-align: right;">bad_reviews</th>
+<th style="text-align: right;">bad_review_rate</th>
+<th style="text-align: right;">review_coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">按期/提前</td>
+<td style="text-align: right;">89672</td>
+<td style="text-align: right;">89182</td>
+<td style="text-align: right;">8247</td>
+<td style="text-align: right;">0.0925</td>
+<td style="text-align: right;">0.9945</td>
+</tr>
+<tr>
+<td style="text-align: left;">延迟1–3天</td>
+<td style="text-align: right;">1869</td>
+<td style="text-align: right;">1851</td>
+<td style="text-align: right;">595</td>
+<td style="text-align: right;">0.3214</td>
+<td style="text-align: right;">0.9904</td>
+</tr>
+<tr>
+<td style="text-align: left;">延迟4–7天</td>
+<td style="text-align: right;">1802</td>
+<td style="text-align: right;">1748</td>
+<td style="text-align: right;">1183</td>
+<td style="text-align: right;">0.6768</td>
+<td style="text-align: right;">0.9700</td>
+</tr>
+<tr>
+<td style="text-align: left;">延迟8–14天</td>
+<td style="text-align: right;">1478</td>
+<td style="text-align: right;">1446</td>
+<td style="text-align: right;">1159</td>
+<td style="text-align: right;">0.8015</td>
+<td style="text-align: right;">0.9783</td>
+</tr>
+<tr>
+<td style="text-align: left;">延迟15天以上</td>
+<td style="text-align: right;">1382</td>
+<td style="text-align: right;">1333</td>
+<td style="text-align: right;">1044</td>
+<td style="text-align: right;">0.7832</td>
+<td style="text-align: right;">0.9645</td>
+</tr>
+</tbody>
+</table>
+<p>评价可能在实际送达前创建。补充限制“评价创建日期不早于送达日期”后得到：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">is_late</th>
+<th style="text-align: right;">n</th>
+<th style="text-align: right;">bad_rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">88961</td>
+<td style="text-align: right;">0.0923</td>
+</tr>
+<tr>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1629</td>
+<td style="text-align: right;">0.2511</td>
+</tr>
+</tbody>
+</table>
+<p>该敏感性筛选也会改变人群，不能消除所有混杂。地区、品类、商家服务与订单难度都可能同时影响延迟和评价。</p>
+<h2>建议排查顺序</h2>
+<ol>
+<li>优先调查峰值月份中贡献最大的地区，再交叉检查 category_month_diagnostic.csv 中的品类变化，核实是普遍运力问题还是具体线路/品类问题。</li>
+<li>对 seller_priority.csv 前 10 个高延迟数量商家做运营核查。这些商家（每家至少 100 个单商家有效订单）的延迟单合计占全部分析延迟订单 <strong>15.60%</strong>；这是可排查覆盖面，不是可承诺消除的损失。</li>
+<li>同时看绝对延迟单数、延迟率及 Wilson 95% 下界，避免小样本商家误入榜单。下界是单商家的描述性区间，不是多重比较校正后的处罚依据。</li>
+<li>若实施预计到货提示或物流分流，另行做随机试点，并同时观察延迟率、取消率、投诉/退货和成本；本数据没有线上干预效果。</li>
+</ol>
+<p>前 10 个排查对象（匿名商家 ID）：</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">seller_id</th>
+<th style="text-align: right;">orders</th>
+<th style="text-align: right;">late_orders</th>
+<th style="text-align: right;">late_rate</th>
+<th style="text-align: right;">late_rate_wilson_lower</th>
+<th style="text-align: right;">bad_review_rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">4a3ca9315b744ce9f8e9374361493884</td>
+<td style="text-align: right;">1673</td>
+<td style="text-align: right;">168.0000</td>
+<td style="text-align: right;">0.1004</td>
+<td style="text-align: right;">0.0869</td>
+<td style="text-align: right;">0.1698</td>
+</tr>
+<tr>
+<td style="text-align: left;">1f50f920176fa81dab994f9023523100</td>
+<td style="text-align: right;">1364</td>
+<td style="text-align: right;">124.0000</td>
+<td style="text-align: right;">0.0909</td>
+<td style="text-align: right;">0.0768</td>
+<td style="text-align: right;">0.1288</td>
+</tr>
+<tr>
+<td style="text-align: left;">4869f7a5dfa277a7dca6462dcf3b52b2</td>
+<td style="text-align: right;">1111</td>
+<td style="text-align: right;">118.0000</td>
+<td style="text-align: right;">0.1062</td>
+<td style="text-align: right;">0.0894</td>
+<td style="text-align: right;">0.1224</td>
+</tr>
+<tr>
+<td style="text-align: left;">ea8482cd71df3c1969d7b9473ff13abc</td>
+<td style="text-align: right;">1116</td>
+<td style="text-align: right;">96.0000</td>
+<td style="text-align: right;">0.0860</td>
+<td style="text-align: right;">0.0710</td>
+<td style="text-align: right;">0.1387</td>
+</tr>
+<tr>
+<td style="text-align: left;">6560211a19b47992c3666cc44a7e94c0</td>
+<td style="text-align: right;">1788</td>
+<td style="text-align: right;">95.0000</td>
+<td style="text-align: right;">0.0531</td>
+<td style="text-align: right;">0.0437</td>
+<td style="text-align: right;">0.1539</td>
+</tr>
+<tr>
+<td style="text-align: left;">7c67e1448b00f6e969d365cea6b010ab</td>
+<td style="text-align: right;">963</td>
+<td style="text-align: right;">89.0000</td>
+<td style="text-align: right;">0.0924</td>
+<td style="text-align: right;">0.0757</td>
+<td style="text-align: right;">0.2508</td>
+</tr>
+<tr>
+<td style="text-align: left;">cc419e0650a3c5ba77189a1882b7556a</td>
+<td style="text-align: right;">1646</td>
+<td style="text-align: right;">87.0000</td>
+<td style="text-align: right;">0.0529</td>
+<td style="text-align: right;">0.0430</td>
+<td style="text-align: right;">0.1285</td>
+</tr>
+<tr>
+<td style="text-align: left;">da8622b14eb17ae2831f4ac5b9dab84a</td>
+<td style="text-align: right;">1272</td>
+<td style="text-align: right;">85.0000</td>
+<td style="text-align: right;">0.0668</td>
+<td style="text-align: right;">0.0544</td>
+<td style="text-align: right;">0.1058</td>
+</tr>
+<tr>
+<td style="text-align: left;">8b321bb669392f5163d04c59e235e066</td>
+<td style="text-align: right;">917</td>
+<td style="text-align: right;">80.0000</td>
+<td style="text-align: right;">0.0872</td>
+<td style="text-align: right;">0.0707</td>
+<td style="text-align: right;">0.1347</td>
+</tr>
+<tr>
+<td style="text-align: left;">955fee9216a65b617aa5c0531780ce60</td>
+<td style="text-align: right;">1252</td>
+<td style="text-align: right;">77.0000</td>
+<td style="text-align: right;">0.0615</td>
+<td style="text-align: right;">0.0495</td>
+<td style="text-align: right;">0.0997</td>
+</tr>
+</tbody>
+</table>
+<h2>复现与交付</h2>
+<p>在本仓库目录运行 <code>python run.py</code>。原始数据 → 8 张原始表 → 聚合/去重中间表 → 订单宽表 → SQL 指标 → Python 分解与图表 → 本报告。数据关系、指标字典与面试说明见项目 README.md。</p></main></html>

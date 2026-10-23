@@ -1,0 +1,21 @@
+﻿check,actual,expected,passed
+order grain count,99441.0,99441.0,True
+order primary key,0.0,0.0,True
+mart primary key,0.0,0.0,True
+customers primary key,0.0,0.0,True
+products primary key,0.0,0.0,True
+sellers primary key,0.0,0.0,True
+translations primary key,0.0,0.0,True
+items orphan order,0.0,0.0,True
+payments orphan order,0.0,0.0,True
+reviews orphan order,0.0,0.0,True
+customer foreign key,0.0,0.0,True
+item product foreign key,0.0,0.0,True
+item seller foreign key,0.0,0.0,True
+item composite key,0.0,0.0,True
+payment composite key,0.0,0.0,True
+item value reconciliation,13591643.700012123,13591643.70001419,True
+payment value reconciliation,16008872.119999077,16008872.119998764,True
+negative item value,0.0,0.0,True
+monthly counts,96203.0,96203.0,True
+symmetric decomposition identity,0.08425673099821647,0.08425673099821648,True
